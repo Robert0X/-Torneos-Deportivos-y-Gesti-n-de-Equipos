@@ -1,0 +1,91 @@
+version: "3.8"
+
+services:
+  # Base de datos PostgreSQL
+  postgres:
+    image: postgres:15-alpine
+    container_name: torneos-postgres
+    environment:
+      POSTGRES_DB: torneos_db
+      POSTGRES_USER: torneos_user
+      POSTGRES_PASSWORD: torneos_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    networks:
+      - torneos-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U torneos_user -d torneos_db"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Aplicación Spring Boot (Backend)
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: torneos-backend
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - DB_USER=torneos_user
+      - DB_PASSWORD=torneos_pass
+      - JWT_SECRET=MiClaveSecretaSuperSeguraParaTorneosDeportivos2024Docker
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - torneos-network
+    volumes:
+      - ./logs:/app/logs
+    healthcheck:
+      test:
+        ["CMD", "curl", "-f", "http://localhost:8080/api/v1/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Frontend React (opcional para desarrollo)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: torneos-frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - REACT_APP_API_URL=http://localhost:8080/api/v1
+    depends_on:
+      - backend
+    networks:
+      - torneos-network
+
+  # Redis para cache (opcional)
+  redis:
+    image: redis:7-alpine
+    container_name: torneos-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - torneos-network
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+
+networks:
+  torneos-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
